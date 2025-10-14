@@ -189,6 +189,14 @@ export namespace MessageV2 {
         end: z.number(),
         compacted: z.number().optional(),
       }),
+      structuredContent: z
+        .array(
+          z.discriminatedUnion("type", [
+            z.object({ type: z.literal("text"), text: z.string() }),
+            FilePart,
+          ]),
+        )
+        .optional(),
       attachments: FilePart.array().optional(),
     })
     .meta({
@@ -533,6 +541,35 @@ export namespace MessageV2 {
               ]
             if (part.type === "tool") {
               if (part.state.status === "completed") {
+                // Priority 1: structuredContent (new approach)
+                if (part.state.structuredContent?.length) {
+                  result.push({
+                    id: Identifier.ascending("message"),
+                    role: "user",
+                    parts: part.state.structuredContent.map((p) => {
+                      if (p.type === "text") {
+                        return { type: "text" as const, text: p.text }
+                      }
+                      return {
+                        type: "file" as const,
+                        url: p.url,
+                        mediaType: p.mime,
+                        filename: p.filename,
+                      }
+                    }),
+                  })
+                  return [
+                    {
+                      type: ("tool-" + part.tool) as `tool-${string}`,
+                      state: "output-available",
+                      toolCallId: part.callID,
+                      input: part.state.input,
+                      output: "[Content returned as structured parts]",
+                      callProviderMetadata: part.metadata,
+                    },
+                  ]
+                }
+                // Priority 2: attachments (legacy fallback)
                 if (part.state.attachments?.length) {
                   result.push({
                     id: Identifier.ascending("message"),
@@ -551,6 +588,7 @@ export namespace MessageV2 {
                     ],
                   })
                 }
+                // Priority 3: standard output
                 return [
                   {
                     type: ("tool-" + part.tool) as `tool-${string}`,

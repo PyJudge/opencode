@@ -27,6 +27,10 @@ export namespace Tool {
         title: string
         metadata: M
         output: string
+        structuredContent?: Array<
+          | { type: "text"; text: string }
+          | MessageV2.FilePart
+        >
         attachments?: MessageV2.FilePart[]
       }>
     }>

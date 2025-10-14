@@ -16,108 +16,172 @@ const MAX_LINE_LENGTH = 2000
 export const ReadTool = Tool.define("read", {
   description: DESCRIPTION,
   parameters: z.object({
-    filePath: z.string().describe("The path to the file to read"),
+    filePath: z.string().describe("The path to the file to read").optional(),
     offset: z.coerce.number().describe("The line number to start reading from (0-based)").optional(),
     limit: z.coerce.number().describe("The number of lines to read (defaults to 2000)").optional(),
+    items: z
+      .array(
+        z.discriminatedUnion("type", [
+          z.object({
+            type: z.literal("text"),
+            text: z.string().describe("Text content to include"),
+          }),
+          z.object({
+            type: z.literal("file"),
+            path: z.string().describe("Path to the file to read"),
+          }),
+        ]),
+      )
+      .describe("Array of text and file items to read in order. Use this for interleaved text and images.")
+      .optional(),
   }),
   async execute(params, ctx) {
-    let filepath = params.filePath
-    if (!path.isAbsolute(filepath)) {
-      filepath = path.join(process.cwd(), filepath)
+    // Validate: must have either filePath or items
+    if (!params.filePath && !params.items) {
+      throw new Error("Either filePath or items must be provided")
     }
-    const title = path.relative(Instance.worktree, filepath)
-
-    if (!ctx.extra?.["bypassCwdCheck"] && !Filesystem.contains(Instance.directory, filepath)) {
-      throw new Error(`File ${filepath} is not in the current working directory`)
+    if (params.filePath && params.items) {
+      throw new Error("Cannot use both filePath and items")
     }
 
-    const file = Bun.file(filepath)
-    if (!(await file.exists())) {
-      const dir = path.dirname(filepath)
-      const base = path.basename(filepath)
+    // Convert single file mode to batch mode for unified processing
+    const items = params.filePath
+      ? [{ type: "file" as const, path: params.filePath, offset: params.offset, limit: params.limit }]
+      : params.items!
 
-      const dirEntries = fs.readdirSync(dir)
-      const suggestions = dirEntries
-        .filter(
-          (entry) =>
-            entry.toLowerCase().includes(base.toLowerCase()) || base.toLowerCase().includes(entry.toLowerCase()),
-        )
-        .map((entry) => path.join(dir, entry))
-        .slice(0, 3)
+    const structuredContent: Array<{ type: "text"; text: string } | { id: string; sessionID: string; messageID: string; type: "file"; mime: string; url: string; filename?: string }> = []
+    let hasImages = false
 
-      if (suggestions.length > 0) {
-        throw new Error(`File not found: ${filepath}\n\nDid you mean one of these?\n${suggestions.join("\n")}`)
+    // Process each item
+    for (const item of items) {
+      if (item.type === "text") {
+        structuredContent.push({
+          type: "text",
+          text: item.text,
+        })
+        continue
       }
 
-      throw new Error(`File not found: ${filepath}`)
+      // Process file item
+      let filepath = item.path
+      if (!path.isAbsolute(filepath)) {
+        filepath = path.join(process.cwd(), filepath)
+      }
+
+      if (!ctx.extra?.["bypassCwdCheck"] && !Filesystem.contains(Instance.directory, filepath)) {
+        throw new Error(`File ${filepath} is not in the current working directory`)
+      }
+
+      const file = Bun.file(filepath)
+      if (!(await file.exists())) {
+        const dir = path.dirname(filepath)
+        const base = path.basename(filepath)
+
+        const dirEntries = fs.readdirSync(dir)
+        const suggestions = dirEntries
+          .filter(
+            (entry) =>
+              entry.toLowerCase().includes(base.toLowerCase()) || base.toLowerCase().includes(entry.toLowerCase()),
+          )
+          .map((entry) => path.join(dir, entry))
+          .slice(0, 3)
+
+        if (suggestions.length > 0) {
+          throw new Error(`File not found: ${filepath}\n\nDid you mean one of these?\n${suggestions.join("\n")}`)
+        }
+
+        throw new Error(`File not found: ${filepath}`)
+      }
+
+      const isImage = isImageFile(filepath)
+      const supportsImages = await (async () => {
+        if (!ctx.extra?.["providerID"] || !ctx.extra?.["modelID"]) return false
+        const providerID = ctx.extra["providerID"] as string
+        const modelID = ctx.extra["modelID"] as string
+        const model = await Provider.getModel(providerID, modelID).catch(() => undefined)
+        if (!model) return false
+        return model.info.modalities?.input?.includes("image") ?? false
+      })()
+
+      if (isImage) {
+        if (!supportsImages) {
+          throw new Error(`Failed to read image: ${filepath}, model may not be able to read images`)
+        }
+        hasImages = true
+        const mime = file.type
+        structuredContent.push({
+          id: Identifier.ascending("part"),
+          sessionID: ctx.sessionID,
+          messageID: ctx.messageID,
+          type: "file",
+          mime,
+          url: `data:${mime};base64,${Buffer.from(await file.bytes()).toString("base64")}`,
+          filename: path.basename(filepath),
+        })
+        continue
+      }
+
+      // Text file processing
+      const isBinary = await isBinaryFile(filepath, file)
+      if (isBinary) throw new Error(`Cannot read binary file: ${filepath}`)
+
+      const limit = ("limit" in item ? item.limit : undefined) ?? DEFAULT_READ_LIMIT
+      const offset = ("offset" in item ? item.offset : undefined) || 0
+      const lines = await file.text().then((text) => text.split("\n"))
+      const raw = lines.slice(offset, offset + limit).map((line) => {
+        return line.length > MAX_LINE_LENGTH ? line.substring(0, MAX_LINE_LENGTH) + "..." : line
+      })
+      const content = raw.map((line, index) => {
+        return `${(index + offset + 1).toString().padStart(5, "0")}| ${line}`
+      })
+
+      let textOutput = "<file>\n"
+      textOutput += content.join("\n")
+
+      if (lines.length > offset + content.length) {
+        textOutput += `\n\n(File has more lines. Use 'offset' parameter to read beyond line ${offset + content.length})`
+      }
+      textOutput += "\n</file>"
+
+      structuredContent.push({
+        type: "text",
+        text: textOutput,
+      })
+
+      // Warm the lsp client
+      LSP.touchFile(filepath, false)
+      FileTime.read(ctx.sessionID, filepath)
     }
 
-    const isImage = isImageFile(filepath)
-    const supportsImages = await (async () => {
-      if (!ctx.extra?.["providerID"] || !ctx.extra?.["modelID"]) return false
-      const providerID = ctx.extra["providerID"] as string
-      const modelID = ctx.extra["modelID"] as string
-      const model = await Provider.getModel(providerID, modelID).catch(() => undefined)
-      if (!model) return false
-      return model.info.modalities?.input?.includes("image") ?? false
-    })()
-    if (isImage) {
-      if (!supportsImages) {
-        throw new Error(`Failed to read image: ${filepath}, model may not be able to read images`)
-      }
-      const mime = file.type
-      const msg = "Image read successfully"
+    // Determine return format
+    const title = params.filePath
+      ? (() => {
+          const fp = params.filePath!
+          return path.relative(Instance.worktree, fp.startsWith("/") ? fp : path.join(process.cwd(), fp))
+        })()
+      : `${items.length} item(s)`
+
+    const preview = structuredContent
+      .filter((p) => p.type === "text")
+      .map((p) => p.text)
+      .join("\n")
+      .slice(0, 100)
+
+    // If has images or multiple items, use structuredContent
+    if (hasImages || items.length > 1) {
       return {
         title,
-        output: msg,
-        metadata: {
-          preview: msg,
-        },
-        attachments: [
-          {
-            id: Identifier.ascending("part"),
-            sessionID: ctx.sessionID,
-            messageID: ctx.messageID,
-            type: "file",
-            mime,
-            url: `data:${mime};base64,${Buffer.from(await file.bytes()).toString("base64")}`,
-          },
-        ],
+        output: "",
+        metadata: { preview },
+        structuredContent,
       }
     }
 
-    const isBinary = await isBinaryFile(filepath, file)
-    if (isBinary) throw new Error(`Cannot read binary file: ${filepath}`)
-
-    const limit = params.limit ?? DEFAULT_READ_LIMIT
-    const offset = params.offset || 0
-    const lines = await file.text().then((text) => text.split("\n"))
-    const raw = lines.slice(offset, offset + limit).map((line) => {
-      return line.length > MAX_LINE_LENGTH ? line.substring(0, MAX_LINE_LENGTH) + "..." : line
-    })
-    const content = raw.map((line, index) => {
-      return `${(index + offset + 1).toString().padStart(5, "0")}| ${line}`
-    })
-    const preview = raw.slice(0, 20).join("\n")
-
-    let output = "<file>\n"
-    output += content.join("\n")
-
-    if (lines.length > offset + content.length) {
-      output += `\n\n(File has more lines. Use 'offset' parameter to read beyond line ${offset + content.length})`
-    }
-    output += "\n</file>"
-
-    // just warms the lsp client
-    LSP.touchFile(filepath, false)
-    FileTime.read(ctx.sessionID, filepath)
-
+    // Single text file: use legacy output format
     return {
       title,
-      output,
-      metadata: {
-        preview,
-      },
+      output: structuredContent[0].type === "text" ? structuredContent[0].text : "",
+      metadata: { preview },
     }
   },
 })
