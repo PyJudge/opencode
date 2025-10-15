@@ -9,7 +9,6 @@ import { Filesystem } from "../util/filesystem"
 import { Instance } from "../project/instance"
 import { Provider } from "../provider/provider"
 import { Identifier } from "../id/id"
-import { isPdfFile, processPdfFile } from "./pdf"
 
 const DEFAULT_READ_LIMIT = 2000
 const MAX_LINE_LENGTH = 2000
@@ -50,10 +49,7 @@ export const ReadTool = Tool.define("read", {
       ? [{ type: "file" as const, path: params.filePath, offset: params.offset, limit: params.limit }]
       : params.items!
 
-    const structuredContent: Array<
-      | { type: "text"; text: string }
-      | { id: string; sessionID: string; messageID: string; type: "file"; mime: string; url: string; filename?: string }
-    > = []
+    const structuredContent: Array<{ type: "text"; text: string } | { id: string; sessionID: string; messageID: string; type: "file"; mime: string; url: string; filename?: string }> = []
     let hasImages = false
 
     // Process each item
@@ -98,12 +94,7 @@ export const ReadTool = Tool.define("read", {
       }
 
       const isImage = isImageFile(filepath)
-      const isPdf = isPdfFile(filepath)
       const supportsImages = await (async () => {
-        // Allow bypassing model check for testing
-        if (ctx.extra?.["supportsImages"] !== undefined) {
-          return ctx.extra["supportsImages"] as boolean
-        }
         if (!ctx.extra?.["providerID"] || !ctx.extra?.["modelID"]) return false
         const providerID = ctx.extra["providerID"] as string
         const modelID = ctx.extra["modelID"] as string
@@ -111,29 +102,6 @@ export const ReadTool = Tool.define("read", {
         if (!model) return false
         return model.info.modalities?.input?.includes("image") ?? false
       })()
-
-      const supportsPdf = await (async () => {
-        // Allow bypassing model check for testing
-        if (ctx.extra?.["supportsPdf"] !== undefined) {
-          return ctx.extra["supportsPdf"] as boolean
-        }
-        if (!ctx.extra?.["providerID"] || !ctx.extra?.["modelID"]) return false
-        const providerID = ctx.extra["providerID"] as string
-        const modelID = ctx.extra["modelID"] as string
-        const model = await Provider.getModel(providerID, modelID).catch(() => undefined)
-        if (!model) return false
-        return model.info.modalities?.input?.includes("pdf") ?? false
-      })()
-
-      if (isPdf) {
-        if (!supportsPdf) {
-          throw new Error(`Failed to read PDF: ${filepath}, model may not be able to read PDF files`)
-        }
-        hasImages = true
-        const pdfContent = await processPdfFile(filepath, ctx)
-        structuredContent.push(...pdfContent)
-        continue
-      }
 
       if (isImage) {
         if (!supportsImages) {
@@ -189,12 +157,7 @@ export const ReadTool = Tool.define("read", {
     const title = params.filePath
       ? (() => {
           const fp = params.filePath!
-          try {
-            return path.relative(Instance.worktree, fp.startsWith("/") ? fp : path.join(process.cwd(), fp))
-          } catch {
-            // Fallback for testing without Instance context
-            return path.basename(fp)
-          }
+          return path.relative(Instance.worktree, fp.startsWith("/") ? fp : path.join(process.cwd(), fp))
         })()
       : `${items.length} item(s)`
 

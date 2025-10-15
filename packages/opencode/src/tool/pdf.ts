@@ -237,6 +237,7 @@ export async function processPdfFile(
   filepath: string,
   ctx: Tool.Context,
   excludeMargins: boolean = true,
+  pages?: number[], // Optional: specific pages to process. If undefined, processes all pages.
 ): Promise<StructuredContentItem[]> {
   const pdfjsLib = await getPdfWorker()
   const data = new Uint8Array(await Bun.file(filepath).arrayBuffer())
@@ -244,8 +245,11 @@ export async function processPdfFile(
 
   const structuredContent: StructuredContentItem[] = []
 
+  // Determine which pages to process
+  const targetPages = pages ?? Array.from({ length: pdf.numPages }, (_, i) => i + 1)
+
   // Process each page
-  for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+  for (const pageNum of targetPages) {
     const page = await pdf.getPage(pageNum)
     const hasText = await pageHasText(page)
 

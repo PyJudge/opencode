@@ -712,6 +712,20 @@ export namespace SessionPrompt {
                 ]
               }
 
+              // Handle PDF files: Don't send entire PDF, instruct agent to use readpdf tool
+              if (part.mime === "application/pdf") {
+                return [
+                  {
+                    id: Identifier.ascending("part"),
+                    messageID: info.id,
+                    sessionID: input.sessionID,
+                    type: "text",
+                    synthetic: true,
+                    text: `A PDF file was attached: ${filepath}\n\nUse the readpdf tool to read this file. Remember to specify the pages parameter when the user mentions specific pages.`,
+                  },
+                ]
+              }
+
               const file = Bun.file(filepath)
               FileTime.read(input.sessionID, filepath)
               return [
@@ -994,6 +1008,7 @@ export namespace SessionPrompt {
                         end: Date.now(),
                       },
                       attachments: value.output.attachments,
+                      structuredContent: value.output.structuredContent,
                     },
                   })
                   delete toolcalls[value.toolCallId]

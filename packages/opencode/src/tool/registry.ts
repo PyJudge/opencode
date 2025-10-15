@@ -5,6 +5,7 @@ import { GrepTool } from "./grep"
 import { ListTool } from "./ls"
 import { PatchTool } from "./patch"
 import { ReadTool } from "./read"
+import { ReadPdfTool } from "./readpdf"
 import { TaskTool } from "./task"
 import { TodoWriteTool, TodoReadTool } from "./todo"
 import { WebFetchTool } from "./webfetch"
@@ -84,6 +85,7 @@ export namespace ToolRegistry {
       ListTool,
       PatchTool,
       ReadTool,
+      ReadPdfTool,
       WriteTool,
       TodoWriteTool,
       TodoReadTool,

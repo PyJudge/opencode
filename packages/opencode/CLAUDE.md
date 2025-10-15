@@ -38,6 +38,7 @@ bun run build    # Build
 - `edit.ts` - File editing (9 fallback strategies)
 - `multiedit.ts` - Multiple edits per file
 - `read.ts` - File reading with offset/limit
+- `readpdf.ts` - PDF reading with mixed content extraction (text + images)
 - `write.ts` - File writing
 - `glob.ts` - File search
 - `grep.ts` - Content search (ripgrep)
