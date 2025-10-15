@@ -177,16 +177,22 @@ async function extractMixedContent(
         }
 
         if (imgData && imgData.data && imgData.width && imgData.height) {
-          const { createCanvas } = await import("@napi-rs/canvas")
-          const canvas = createCanvas(imgData.width, imgData.height)
-          const ctx2d = canvas.getContext("2d")
+          // Use Sharp for reliable image conversion
+          const { default: sharp } = await import("sharp")
 
-          // ImageData 생성 및 렌더링
-          const imageData = ctx2d.createImageData(imgData.width, imgData.height)
-          imageData.data.set(new Uint8ClampedArray(imgData.data))
-          ctx2d.putImageData(imageData, 0, 0)
+          // Determine channels based on imgData.kind
+          // 1 = GRAYSCALE_1BPP, 2 = RGB_24BPP, 3 = RGBA_32BPP
+          const channels = imgData.kind === 1 ? 1 : imgData.kind === 2 ? 3 : 4
 
-          const buffer = canvas.toBuffer("image/png")
+          const buffer = await sharp(Buffer.from(imgData.data), {
+            raw: {
+              width: imgData.width,
+              height: imgData.height,
+              channels: channels,
+            },
+          })
+            .png()
+            .toBuffer()
 
           result.push({
             id: Identifier.ascending("part"),
@@ -245,6 +251,7 @@ export async function processPdfFile(
 
     if (!hasText) {
       // No text layer - render entire page as image
+      // For page rendering, we still need canvas since Sharp can't render PDF pages
       const { createCanvas } = await import("@napi-rs/canvas")
       const viewport = page.getViewport({ scale: 1.5 })
       const canvas = createCanvas(viewport.width, viewport.height)
