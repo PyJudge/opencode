@@ -177,7 +177,7 @@ async function extractMixedContent(
         }
 
         if (imgData && imgData.data && imgData.width && imgData.height) {
-          const { createCanvas } = await import("canvas")
+          const { createCanvas } = await import("@napi-rs/canvas")
           const canvas = createCanvas(imgData.width, imgData.height)
           const ctx2d = canvas.getContext("2d")
 
@@ -245,7 +245,7 @@ export async function processPdfFile(
 
     if (!hasText) {
       // No text layer - render entire page as image
-      const { createCanvas } = await import("canvas")
+      const { createCanvas } = await import("@napi-rs/canvas")
       const viewport = page.getViewport({ scale: 1.5 })
       const canvas = createCanvas(viewport.width, viewport.height)
       const context = canvas.getContext("2d")
