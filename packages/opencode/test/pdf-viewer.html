@@ -278,9 +278,15 @@
       const container = document.getElementById('pdfOriginal');
       const renderStart = performance.now();
 
-      for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+      // Only render first 3 pages for large PDFs
+      const maxPages = Math.min(pdf.numPages, 3);
+      container.innerHTML = `<div style="padding: 20px; text-align: center; color: #666;">
+        Rendering first ${maxPages} of ${pdf.numPages} pages...
+      </div>`;
+
+      for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
         const page = await pdf.getPage(pageNum);
-        const viewport = page.getViewport({ scale: 1.5 });
+        const viewport = page.getViewport({ scale: 1.0 });
 
         const pageDiv = document.createElement('div');
         pageDiv.className = 'pdf-page';
@@ -299,165 +305,50 @@
         container.appendChild(pageDiv);
       }
 
+      if (pdf.numPages > maxPages) {
+        container.innerHTML += `<div style="padding: 20px; text-align: center; color: #999;">
+          ... ${pdf.numPages - maxPages} more pages not shown ...
+        </div>`;
+      }
+
       timings.render = performance.now() - renderStart;
     }
 
     async function processAsReadTool(pdf, filename) {
       const processStart = performance.now();
-      const structuredContent = [];
 
-      for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-        const page = await pdf.getPage(pageNum);
+      // Send PDF to backend server which uses actual processPdfFile() from pdf.ts
+      const formData = new FormData();
 
-        // Check if page has text (OCR detection)
-        const textContent = await page.getTextContent();
-        const text = textContent.items.map(item => item.str).join('').trim();
-        const hasText = text.length > 10;
+      // Get the original file from file input
+      const fileInput = document.getElementById('fileInput');
+      if (fileInput.files && fileInput.files[0]) {
+        formData.append('pdf', fileInput.files[0]);
 
-        if (!hasText) {
-          // No text - render entire page as image
-          structuredContent.push({
-            type: 'text',
-            text: `<page number="${pageNum}">`
+        try {
+          const response = await fetch('/api/process-pdf', {
+            method: 'POST',
+            body: formData
           });
 
-          const imageData = await renderPageToImage(page);
-          const imagePart = {
-            type: 'file',
-            mime: 'image/png',
-            url: imageData,
-            filename: `page${pageNum}.png`
-          };
+          const result = await response.json();
 
-          structuredContent.push(imagePart);
-
-          structuredContent.push({
-            type: 'text',
-            text: `</page>`
-          });
-        } else {
-          // Has text - extract mixed content (text + images) in order
-          const mixedContent = await extractMixedContentForPage(page, pageNum);
-          structuredContent.push(...mixedContent);
-        }
-      }
-
-      timings.process = performance.now() - processStart;
-
-      // Render structured content
-      renderStructuredContent(structuredContent);
-    }
-
-    async function renderPageToImage(page) {
-      const viewport = page.getViewport({ scale: 1.5 });
-      const canvas = document.createElement('canvas');
-      const context = canvas.getContext('2d');
-      canvas.height = viewport.height;
-      canvas.width = viewport.width;
-
-      await page.render({
-        canvasContext: context,
-        viewport: viewport
-      }).promise;
-
-      return canvas.toDataURL('image/png');
-    }
-
-    // Extract mixed content (text + images) in order
-    async function extractMixedContentForPage(page, pageNum) {
-      const ops = await page.getOperatorList();
-      const textContent = await page.getTextContent();
-
-      const result = [];
-      result.push({ type: 'text', text: `<page number="${pageNum}">` });
-
-      let textIdx = 0;
-      let currentTextBlock = "";
-
-      // Iterate through PDF operators in stream order
-      for (let i = 0; i < ops.fnArray.length; i++) {
-        const fn = ops.fnArray[i];
-        const args = ops.argsArray[i];
-
-        // Text operators
-        if (fn === pdfjsLib.OPS.showText ||
-            fn === pdfjsLib.OPS.showSpacedText ||
-            fn === pdfjsLib.OPS.nextLineShowText ||
-            fn === pdfjsLib.OPS.nextLineSetSpacingShowText) {
-
-          if (textIdx < textContent.items.length) {
-            const item = textContent.items[textIdx];
-            if (item.str && item.str.trim()) {
-              currentTextBlock += item.str + " ";
-            }
-            textIdx++;
-          }
-        }
-
-        // Image operators
-        else if (fn === pdfjsLib.OPS.paintImageXObject ||
-                 fn === pdfjsLib.OPS.paintJpegXObject ||
-                 fn === pdfjsLib.OPS.paintInlineImageXObject ||
-                 fn === pdfjsLib.OPS.paintImageMaskXObject) {
-
-          // Add accumulated text before image
-          if (currentTextBlock.trim()) {
-            result.push({
-              type: 'text',
-              text: currentTextBlock.trim() + '\n'
-            });
-            currentTextBlock = "";
+          if (result.success) {
+            timings.process = performance.now() - processStart;
+            renderStructuredContent(result.structuredContent);
+            console.log(`✅ Processed using actual pdf.ts functions!`);
+            console.log(`   Extracted ${result.structuredContent.length} items`);
+          } else {
+            throw new Error(result.error || 'Unknown error');
           }
 
-          // Extract image
-          const imgName = args[0];
-          try {
-            let imgData = null;
-
-            try {
-              imgData = await page.objs.get(imgName);
-            } catch {
-              if (imgName && imgName.startsWith("g_")) {
-                imgData = await page.commonObjs.get(imgName);
-              }
-            }
-
-            if (imgData && imgData.data && imgData.width && imgData.height) {
-              const canvas = document.createElement('canvas');
-              canvas.width = imgData.width;
-              canvas.height = imgData.height;
-              const ctx = canvas.getContext('2d');
-
-              const imageData = ctx.createImageData(imgData.width, imgData.height);
-              imageData.data.set(new Uint8ClampedArray(imgData.data));
-              ctx.putImageData(imageData, 0, 0);
-
-              const dataUrl = canvas.toDataURL('image/png');
-
-              result.push({
-                type: 'file',
-                mime: 'image/png',
-                url: dataUrl,
-                filename: `page${pageNum}-${imgName}.png`
-              });
-            }
-          } catch (err) {
-            console.warn(`Failed to extract image ${imgName}:`, err);
-          }
+        } catch (err) {
+          console.error('❌ Failed to process PDF:', err);
+          alert('Failed to process PDF. See console for details.');
         }
+      } else {
+        console.error('No file selected');
       }
-
-      // Add remaining text
-      if (currentTextBlock.trim()) {
-        result.push({
-          type: 'text',
-          text: currentTextBlock.trim() + '\n'
-        });
-      }
-
-      result.push({ type: 'text', text: `</page>` });
-
-      return result;
     }
 
     function renderStructuredContent(structuredContent) {
