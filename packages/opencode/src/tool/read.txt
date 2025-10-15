@@ -14,6 +14,8 @@ Usage:
   * Automatically detects if PDF has OCR (text layer exists)
   * For text-based PDFs: extracts text with page numbers in <page number="N">...</page> format
   * For image-only PDFs (no OCR): renders pages as images
-  * For mixed PDFs: preserves order of text and images within each page
+  * For mixed PDFs: preserves exact order of text and images (follows PDF stream order)
+  * Automatically excludes margins: headers (top 8%), footers (bottom 8%), left margin (8%), right margin (8%)
+  * Embedded images within text are extracted and placed at correct positions
   * All content is returned with page numbers for context
   * Page order is always preserved

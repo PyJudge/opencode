@@ -9,6 +9,7 @@ import { Filesystem } from "../util/filesystem"
 import { Instance } from "../project/instance"
 import { Provider } from "../provider/provider"
 import { Identifier } from "../id/id"
+import { isPdfFile, processPdfFile } from "./pdf"
 
 const DEFAULT_READ_LIMIT = 2000
 const MAX_LINE_LENGTH = 2000
@@ -49,7 +50,10 @@ export const ReadTool = Tool.define("read", {
       ? [{ type: "file" as const, path: params.filePath, offset: params.offset, limit: params.limit }]
       : params.items!
 
-    const structuredContent: Array<{ type: "text"; text: string } | { id: string; sessionID: string; messageID: string; type: "file"; mime: string; url: string; filename?: string }> = []
+    const structuredContent: Array<
+      | { type: "text"; text: string }
+      | { id: string; sessionID: string; messageID: string; type: "file"; mime: string; url: string; filename?: string }
+    > = []
     let hasImages = false
 
     // Process each item
@@ -96,6 +100,10 @@ export const ReadTool = Tool.define("read", {
       const isImage = isImageFile(filepath)
       const isPdf = isPdfFile(filepath)
       const supportsImages = await (async () => {
+        // Allow bypassing model check for testing
+        if (ctx.extra?.["supportsImages"] !== undefined) {
+          return ctx.extra["supportsImages"] as boolean
+        }
         if (!ctx.extra?.["providerID"] || !ctx.extra?.["modelID"]) return false
         const providerID = ctx.extra["providerID"] as string
         const modelID = ctx.extra["modelID"] as string
@@ -105,6 +113,10 @@ export const ReadTool = Tool.define("read", {
       })()
 
       const supportsPdf = await (async () => {
+        // Allow bypassing model check for testing
+        if (ctx.extra?.["supportsPdf"] !== undefined) {
+          return ctx.extra["supportsPdf"] as boolean
+        }
         if (!ctx.extra?.["providerID"] || !ctx.extra?.["modelID"]) return false
         const providerID = ctx.extra["providerID"] as string
         const modelID = ctx.extra["modelID"] as string
@@ -177,7 +189,12 @@ export const ReadTool = Tool.define("read", {
     const title = params.filePath
       ? (() => {
           const fp = params.filePath!
-          return path.relative(Instance.worktree, fp.startsWith("/") ? fp : path.join(process.cwd(), fp))
+          try {
+            return path.relative(Instance.worktree, fp.startsWith("/") ? fp : path.join(process.cwd(), fp))
+          } catch {
+            // Fallback for testing without Instance context
+            return path.basename(fp)
+          }
         })()
       : `${items.length} item(s)`
 
@@ -223,97 +240,6 @@ function isImageFile(filePath: string): string | false {
     default:
       return false
   }
-}
-
-function isPdfFile(filePath: string): boolean {
-  const ext = path.extname(filePath).toLowerCase()
-  return ext === ".pdf"
-}
-
-// PDF.js worker singleton
-let pdfWorkerPromise: Promise<any> | null = null
-async function getPdfWorker() {
-  if (!pdfWorkerPromise) {
-    pdfWorkerPromise = (async () => {
-      const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs")
-      const workerUrl = import.meta.resolve("pdfjs-dist/legacy/build/pdf.worker.mjs")
-      pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl.replace("file://", "")
-      return pdfjsLib
-    })()
-  }
-  return pdfWorkerPromise
-}
-
-// Check if a PDF page has extractable text (OCR detection)
-async function pageHasText(page: any): Promise<boolean> {
-  const textContent = await page.getTextContent()
-  const text = textContent.items
-    .map((item: any) => ("str" in item ? item.str : ""))
-    .join("")
-    .trim()
-  // Consider OCR'd if there's at least 10 characters of meaningful text
-  return text.length > 10
-}
-
-// Process a PDF file and extract text/images in order
-async function processPdfFile(
-  filepath: string,
-  ctx: Tool.Context,
-): Promise<Array<{ type: "text"; text: string } | { id: string; sessionID: string; messageID: string; type: "file"; mime: string; url: string; filename?: string }>> {
-  const pdfjsLib = await getPdfWorker()
-  const data = new Uint8Array(await Bun.file(filepath).arrayBuffer())
-  const pdf = await pdfjsLib.getDocument({ data }).promise
-
-  const structuredContent: Array<
-    | { type: "text"; text: string }
-    | { id: string; sessionID: string; messageID: string; type: "file"; mime: string; url: string; filename?: string }
-  > = []
-
-  // Process each page
-  for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-    const page = await pdf.getPage(pageNum)
-    const hasText = await pageHasText(page)
-
-    if (!hasText) {
-      // No text layer - render page as image
-      const { createCanvas } = await import("canvas")
-      const viewport = page.getViewport({ scale: 1.5 })
-      const canvas = createCanvas(viewport.width, viewport.height)
-      const context = canvas.getContext("2d")
-
-      await page.render({
-        canvasContext: context as any,
-        viewport: viewport,
-      }).promise
-
-      const imageBuffer = canvas.toBuffer("image/png")
-
-      structuredContent.push(
-        { type: "text", text: `<page number="${pageNum}">` },
-        {
-          id: Identifier.ascending("part"),
-          sessionID: ctx.sessionID,
-          messageID: ctx.messageID,
-          type: "file",
-          mime: "image/png",
-          url: `data:image/png;base64,${imageBuffer.toString("base64")}`,
-          filename: `page${pageNum}.png`,
-        },
-        { type: "text", text: `</page>` },
-      )
-    } else {
-      // Has text - extract it
-      const textContent = await page.getTextContent()
-      const text = textContent.items.map((item: any) => ("str" in item ? item.str : "")).join("\n")
-
-      structuredContent.push({
-        type: "text",
-        text: `<page number="${pageNum}">\n${text}\n</page>`,
-      })
-    }
-  }
-
-  return structuredContent
 }
 
 async function isBinaryFile(filepath: string, file: Bun.BunFile): Promise<boolean> {
