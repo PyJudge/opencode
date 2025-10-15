@@ -94,6 +94,7 @@ export const ReadTool = Tool.define("read", {
       }
 
       const isImage = isImageFile(filepath)
+      const isPdf = isPdfFile(filepath)
       const supportsImages = await (async () => {
         if (!ctx.extra?.["providerID"] || !ctx.extra?.["modelID"]) return false
         const providerID = ctx.extra["providerID"] as string
@@ -102,6 +103,25 @@ export const ReadTool = Tool.define("read", {
         if (!model) return false
         return model.info.modalities?.input?.includes("image") ?? false
       })()
+
+      const supportsPdf = await (async () => {
+        if (!ctx.extra?.["providerID"] || !ctx.extra?.["modelID"]) return false
+        const providerID = ctx.extra["providerID"] as string
+        const modelID = ctx.extra["modelID"] as string
+        const model = await Provider.getModel(providerID, modelID).catch(() => undefined)
+        if (!model) return false
+        return model.info.modalities?.input?.includes("pdf") ?? false
+      })()
+
+      if (isPdf) {
+        if (!supportsPdf) {
+          throw new Error(`Failed to read PDF: ${filepath}, model may not be able to read PDF files`)
+        }
+        hasImages = true
+        const pdfContent = await processPdfFile(filepath, ctx)
+        structuredContent.push(...pdfContent)
+        continue
+      }
 
       if (isImage) {
         if (!supportsImages) {
@@ -203,6 +223,97 @@ function isImageFile(filePath: string): string | false {
     default:
       return false
   }
+}
+
+function isPdfFile(filePath: string): boolean {
+  const ext = path.extname(filePath).toLowerCase()
+  return ext === ".pdf"
+}
+
+// PDF.js worker singleton
+let pdfWorkerPromise: Promise<any> | null = null
+async function getPdfWorker() {
+  if (!pdfWorkerPromise) {
+    pdfWorkerPromise = (async () => {
+      const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs")
+      const workerUrl = import.meta.resolve("pdfjs-dist/legacy/build/pdf.worker.mjs")
+      pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl.replace("file://", "")
+      return pdfjsLib
+    })()
+  }
+  return pdfWorkerPromise
+}
+
+// Check if a PDF page has extractable text (OCR detection)
+async function pageHasText(page: any): Promise<boolean> {
+  const textContent = await page.getTextContent()
+  const text = textContent.items
+    .map((item: any) => ("str" in item ? item.str : ""))
+    .join("")
+    .trim()
+  // Consider OCR'd if there's at least 10 characters of meaningful text
+  return text.length > 10
+}
+
+// Process a PDF file and extract text/images in order
+async function processPdfFile(
+  filepath: string,
+  ctx: Tool.Context,
+): Promise<Array<{ type: "text"; text: string } | { id: string; sessionID: string; messageID: string; type: "file"; mime: string; url: string; filename?: string }>> {
+  const pdfjsLib = await getPdfWorker()
+  const data = new Uint8Array(await Bun.file(filepath).arrayBuffer())
+  const pdf = await pdfjsLib.getDocument({ data }).promise
+
+  const structuredContent: Array<
+    | { type: "text"; text: string }
+    | { id: string; sessionID: string; messageID: string; type: "file"; mime: string; url: string; filename?: string }
+  > = []
+
+  // Process each page
+  for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+    const page = await pdf.getPage(pageNum)
+    const hasText = await pageHasText(page)
+
+    if (!hasText) {
+      // No text layer - render page as image
+      const { createCanvas } = await import("canvas")
+      const viewport = page.getViewport({ scale: 1.5 })
+      const canvas = createCanvas(viewport.width, viewport.height)
+      const context = canvas.getContext("2d")
+
+      await page.render({
+        canvasContext: context as any,
+        viewport: viewport,
+      }).promise
+
+      const imageBuffer = canvas.toBuffer("image/png")
+
+      structuredContent.push(
+        { type: "text", text: `<page number="${pageNum}">` },
+        {
+          id: Identifier.ascending("part"),
+          sessionID: ctx.sessionID,
+          messageID: ctx.messageID,
+          type: "file",
+          mime: "image/png",
+          url: `data:image/png;base64,${imageBuffer.toString("base64")}`,
+          filename: `page${pageNum}.png`,
+        },
+        { type: "text", text: `</page>` },
+      )
+    } else {
+      // Has text - extract it
+      const textContent = await page.getTextContent()
+      const text = textContent.items.map((item: any) => ("str" in item ? item.str : "")).join("\n")
+
+      structuredContent.push({
+        type: "text",
+        text: `<page number="${pageNum}">\n${text}\n</page>`,
+      })
+    }
+  }
+
+  return structuredContent
 }
 
 async function isBinaryFile(filepath: string, file: Bun.BunFile): Promise<boolean> {
