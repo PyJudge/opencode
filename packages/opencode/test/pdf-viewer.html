@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PDF ReadTool Viewer - OpenCode Test</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      height: 100vh;
+      overflow: hidden;
+      background: #f5f5f5;
+    }
+
+    .header {
+      background: #2c3e50;
+      color: white;
+      padding: 15px 20px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    }
+
+    .header h1 {
+      font-size: 20px;
+      margin-bottom: 5px;
+    }
+
+    .header .stats {
+      font-size: 12px;
+      opacity: 0.8;
+    }
+
+    .upload-area {
+      padding: 20px;
+      background: white;
+      border-bottom: 1px solid #ddd;
+    }
+
+    .upload-btn {
+      background: #3498db;
+      color: white;
+      padding: 10px 20px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      margin-right: 10px;
+    }
+
+    .upload-btn:hover {
+      background: #2980b9;
+    }
+
+    .showcase-btn {
+      background: #9b59b6;
+      color: white;
+      padding: 10px 20px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+
+    .showcase-btn:hover {
+      background: #8e44ad;
+    }
+
+    .container {
+      display: flex;
+      height: calc(100vh - 140px);
+      gap: 10px;
+      padding: 10px;
+    }
+
+    .left-panel {
+      flex: 1;
+      background: white;
+      border-radius: 8px;
+      overflow: auto;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+      padding: 20px;
+    }
+
+    .right-panel {
+      flex: 1;
+      background: white;
+      border-radius: 8px;
+      overflow: auto;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+      padding: 20px;
+    }
+
+    .panel-title {
+      font-size: 14px;
+      font-weight: bold;
+      color: #2c3e50;
+      margin-bottom: 15px;
+      padding-bottom: 10px;
+      border-bottom: 2px solid #3498db;
+    }
+
+    .pdf-page {
+      margin-bottom: 20px;
+      border: 1px solid #ddd;
+      page-break-inside: avoid;
+    }
+
+    canvas {
+      max-width: 100%;
+      height: auto;
+      display: block;
+    }
+
+    .text-block {
+      background: #f8f9fa;
+      border-left: 4px solid #3498db;
+      padding: 12px;
+      margin: 10px 0;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+
+    .text-block .label {
+      color: #3498db;
+      font-weight: bold;
+      display: block;
+      margin-bottom: 8px;
+      font-size: 11px;
+    }
+
+    .image-block {
+      border: 2px solid #e74c3c;
+      margin: 15px 0;
+      padding: 15px;
+      background: #fff;
+      text-align: center;
+    }
+
+    .image-block .label {
+      color: #e74c3c;
+      font-weight: bold;
+      display: block;
+      margin-bottom: 10px;
+      font-size: 11px;
+    }
+
+    .image-block img {
+      max-width: 100%;
+      border: 1px solid #ddd;
+      margin-top: 5px;
+    }
+
+    .extracted-image-item {
+      margin-bottom: 20px;
+      padding: 15px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      background: #fafafa;
+    }
+
+    .extracted-image-item .image-info {
+      font-size: 11px;
+      color: #666;
+      margin-bottom: 10px;
+      font-family: 'Courier New', monospace;
+    }
+
+    .extracted-image-item img {
+      max-width: 100%;
+      border: 1px solid #ddd;
+    }
+
+    .timing {
+      background: #e8f5e9;
+      padding: 10px;
+      margin: 10px 0;
+      border-radius: 4px;
+      font-size: 12px;
+      font-family: 'Courier New', monospace;
+    }
+
+    .timing .time-label {
+      color: #2e7d32;
+      font-weight: bold;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: #999;
+    }
+
+    .empty-state-icon {
+      font-size: 48px;
+      margin-bottom: 20px;
+    }
+
+    #fileInput {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>📄 PDF ReadTool Viewer - OpenCode Test</h1>
+    <div class="stats" id="stats">Upload a PDF or load showcase example</div>
+  </div>
+
+  <div class="upload-area">
+    <input type="file" id="fileInput" accept="application/pdf">
+    <button class="upload-btn" onclick="document.getElementById('fileInput').click()">
+      📁 Upload PDF
+    </button>
+    <button class="showcase-btn" onclick="loadShowcase()">
+      ✨ Load Showcase Example
+    </button>
+  </div>
+
+  <div class="container">
+    <div class="left-panel">
+      <div class="panel-title">📖 Original PDF</div>
+      <div id="pdfOriginal">
+        <div class="empty-state">
+          <div class="empty-state-icon">📄</div>
+          <div>Upload a PDF file to see the original rendering</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="right-panel">
+      <div class="panel-title">🔧 ReadTool Output (structuredContent)</div>
+      <div id="structuredOutput"></div>
+    </div>
+  </div>
+
+  <script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+    let currentPdf = null;
+    const timings = {};
+
+    document.getElementById('fileInput').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        await processPDF(file);
+      }
+    });
+
+    async function processPDF(file) {
+      const startTime = performance.now();
+
+      // Clear previous content
+      document.getElementById('pdfOriginal').innerHTML = '';
+      document.getElementById('structuredOutput').innerHTML = '';
+
+      const arrayBuffer = await file.arrayBuffer();
+      const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+      const pdf = await loadingTask.promise;
+      currentPdf = pdf;
+
+      timings.load = performance.now() - startTime;
+
+      // Render original PDF
+      await renderOriginalPDF(pdf);
+
+      // Process as ReadTool would
+      await processAsReadTool(pdf, file.name);
+
+      // Update stats
+      updateStats(file.name, pdf.numPages);
+    }
+
+    async function renderOriginalPDF(pdf) {
+      const container = document.getElementById('pdfOriginal');
+      const renderStart = performance.now();
+
+      for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+        const page = await pdf.getPage(pageNum);
+        const viewport = page.getViewport({ scale: 1.5 });
+
+        const pageDiv = document.createElement('div');
+        pageDiv.className = 'pdf-page';
+
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        canvas.height = viewport.height;
+        canvas.width = viewport.width;
+
+        await page.render({
+          canvasContext: context,
+          viewport: viewport
+        }).promise;
+
+        pageDiv.appendChild(canvas);
+        container.appendChild(pageDiv);
+      }
+
+      timings.render = performance.now() - renderStart;
+    }
+
+    async function processAsReadTool(pdf, filename) {
+      const processStart = performance.now();
+      const structuredContent = [];
+
+      for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+        const page = await pdf.getPage(pageNum);
+
+        // Check if page has text (OCR detection)
+        const textContent = await page.getTextContent();
+        const text = textContent.items.map(item => item.str).join('').trim();
+        const hasText = text.length > 10;
+
+        if (!hasText) {
+          // No text - render entire page as image
+          structuredContent.push({
+            type: 'text',
+            text: `<page number="${pageNum}">`
+          });
+
+          const imageData = await renderPageToImage(page);
+          const imagePart = {
+            type: 'file',
+            mime: 'image/png',
+            url: imageData,
+            filename: `page${pageNum}.png`
+          };
+
+          structuredContent.push(imagePart);
+
+          structuredContent.push({
+            type: 'text',
+            text: `</page>`
+          });
+        } else {
+          // Has text - extract mixed content (text + images) in order
+          const mixedContent = await extractMixedContentForPage(page, pageNum);
+          structuredContent.push(...mixedContent);
+        }
+      }
+
+      timings.process = performance.now() - processStart;
+
+      // Render structured content
+      renderStructuredContent(structuredContent);
+    }
+
+    async function renderPageToImage(page) {
+      const viewport = page.getViewport({ scale: 1.5 });
+      const canvas = document.createElement('canvas');
+      const context = canvas.getContext('2d');
+      canvas.height = viewport.height;
+      canvas.width = viewport.width;
+
+      await page.render({
+        canvasContext: context,
+        viewport: viewport
+      }).promise;
+
+      return canvas.toDataURL('image/png');
+    }
+
+    // Extract mixed content (text + images) in order
+    async function extractMixedContentForPage(page, pageNum) {
+      const ops = await page.getOperatorList();
+      const textContent = await page.getTextContent();
+
+      const result = [];
+      result.push({ type: 'text', text: `<page number="${pageNum}">` });
+
+      let textIdx = 0;
+      let currentTextBlock = "";
+
+      // Iterate through PDF operators in stream order
+      for (let i = 0; i < ops.fnArray.length; i++) {
+        const fn = ops.fnArray[i];
+        const args = ops.argsArray[i];
+
+        // Text operators
+        if (fn === pdfjsLib.OPS.showText ||
+            fn === pdfjsLib.OPS.showSpacedText ||
+            fn === pdfjsLib.OPS.nextLineShowText ||
+            fn === pdfjsLib.OPS.nextLineSetSpacingShowText) {
+
+          if (textIdx < textContent.items.length) {
+            const item = textContent.items[textIdx];
+            if (item.str && item.str.trim()) {
+              currentTextBlock += item.str + " ";
+            }
+            textIdx++;
+          }
+        }
+
+        // Image operators
+        else if (fn === pdfjsLib.OPS.paintImageXObject ||
+                 fn === pdfjsLib.OPS.paintJpegXObject ||
+                 fn === pdfjsLib.OPS.paintInlineImageXObject ||
+                 fn === pdfjsLib.OPS.paintImageMaskXObject) {
+
+          // Add accumulated text before image
+          if (currentTextBlock.trim()) {
+            result.push({
+              type: 'text',
+              text: currentTextBlock.trim() + '\n'
+            });
+            currentTextBlock = "";
+          }
+
+          // Extract image
+          const imgName = args[0];
+          try {
+            let imgData = null;
+
+            try {
+              imgData = await page.objs.get(imgName);
+            } catch {
+              if (imgName && imgName.startsWith("g_")) {
+                imgData = await page.commonObjs.get(imgName);
+              }
+            }
+
+            if (imgData && imgData.data && imgData.width && imgData.height) {
+              const canvas = document.createElement('canvas');
+              canvas.width = imgData.width;
+              canvas.height = imgData.height;
+              const ctx = canvas.getContext('2d');
+
+              const imageData = ctx.createImageData(imgData.width, imgData.height);
+              imageData.data.set(new Uint8ClampedArray(imgData.data));
+              ctx.putImageData(imageData, 0, 0);
+
+              const dataUrl = canvas.toDataURL('image/png');
+
+              result.push({
+                type: 'file',
+                mime: 'image/png',
+                url: dataUrl,
+                filename: `page${pageNum}-${imgName}.png`
+              });
+            }
+          } catch (err) {
+            console.warn(`Failed to extract image ${imgName}:`, err);
+          }
+        }
+      }
+
+      // Add remaining text
+      if (currentTextBlock.trim()) {
+        result.push({
+          type: 'text',
+          text: currentTextBlock.trim() + '\n'
+        });
+      }
+
+      result.push({ type: 'text', text: `</page>` });
+
+      return result;
+    }
+
+    function renderStructuredContent(structuredContent) {
+      const container = document.getElementById('structuredOutput');
+
+      // Add timing info
+      const timingDiv = document.createElement('div');
+      timingDiv.className = 'timing';
+      timingDiv.innerHTML = `
+        <div><span class="time-label">PDF Load:</span> ${timings.load.toFixed(2)}ms</div>
+        <div><span class="time-label">Original Render:</span> ${timings.render.toFixed(2)}ms</div>
+        <div><span class="time-label">ReadTool Process:</span> ${timings.process.toFixed(2)}ms</div>
+        <div><span class="time-label">Total:</span> ${(timings.load + timings.render + timings.process).toFixed(2)}ms</div>
+      `;
+      container.appendChild(timingDiv);
+
+      structuredContent.forEach((item, idx) => {
+        if (item.type === 'text') {
+          const textBlock = document.createElement('div');
+          textBlock.className = 'text-block';
+          textBlock.innerHTML = `
+            <span class="label">TEXT (item #${idx})</span>
+            ${escapeHtml(item.text)}
+          `;
+          container.appendChild(textBlock);
+        } else if (item.type === 'file') {
+          const imageBlock = document.createElement('div');
+          imageBlock.className = 'image-block';
+          imageBlock.innerHTML = `
+            <span class="label">IMAGE (item #${idx}): ${item.filename}</span>
+            <div style="font-size: 10px; color: #999; margin-bottom: 5px;">
+              MIME: ${item.mime} | Size: ${(item.url.length / 1024).toFixed(2)} KB (base64)
+            </div>
+            <img src="${item.url}" />
+          `;
+          container.appendChild(imageBlock);
+        }
+      });
+    }
+
+    function updateStats(filename, numPages) {
+      document.getElementById('stats').textContent =
+        `📊 ${filename} | ${numPages} pages | ⏱️ Total: ${(timings.load + timings.render + timings.process).toFixed(2)}ms`;
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    // Showcase example with mock data
+    async function loadShowcase() {
+      const showcase = {
+        type: 'text',
+        name: 'Mixed Content PDF Example',
+        pages: 2,
+        structuredContent: [
+          {
+            type: 'text',
+            text: '<page number="1">\nIntroduction to Neural Networks\n\nA neural network is a series of algorithms that endeavors to recognize underlying relationships in a set of data through a process that mimics the way the human brain operates.\n\nKey Concepts:\n- Neurons and layers\n- Activation functions\n- Backpropagation\n'
+          },
+          {
+            type: 'file',
+            mime: 'image/png',
+            url: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iNDAwIiBoZWlnaHQ9IjIwMCIgZmlsbD0iI2YwZjBmMCIvPjx0ZXh0IHg9IjIwMCIgeT0iMTAwIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMjQiIHRleHQtYW5jaG9yPSJtaWRkbGUiPkRpYWdyYW06IE5ldXJhbCBOZXR3b3JrIEFyY2hpdGVjdHVyZTwvdGV4dD48Y2lyY2xlIGN4PSI1MCIgY3k9IjEwMCIgcj0iMjAiIGZpbGw9IiMzNDk4ZGIiLz48Y2lyY2xlIGN4PSIyMDAiIGN5PSI1MCIgcj0iMjAiIGZpbGw9IiMyZWNjNzEiLz48Y2lyY2xlIGN4PSIyMDAiIGN5PSIxNTAiIHI9IjIwIiBmaWxsPSIjMmVjYzcxIi8+PGNpcmNsZSBjeD0iMzUwIiBjeT0iMTAwIiByPSIyMCIgZmlsbD0iI2U3NGMzYyIvPjxsaW5lIHgxPSI3MCIgeTE9IjEwMCIgeDI9IjE4MCIgeTI9IjUwIiBzdHJva2U9IiM5OTkiIHN0cm9rZS13aWR0aD0iMiIvPjxsaW5lIHgxPSI3MCIgeTE9IjEwMCIgeDI9IjE4MCIgeTI9IjE1MCIgc3Ryb2tlPSIjOTk5IiBzdHJva2Utd2lkdGg9IjIiLz48bGluZSB4MT0iMjIwIiB5MT0iNTAiIHgyPSIzMzAiIHkyPSIxMDAiIHN0cm9rZT0iIzk5OSIgc3Ryb2tlLXdpZHRoPSIyIi8+PGxpbmUgeDE9IjIyMCIgeTE9IjE1MCIgeDI9IjMzMCIgeTI9IjEwMCIgc3Ryb2tlPSIjOTk5IiBzdHJva2Utd2lkdGg9IjIiLz48L3N2Zz4=',
+            filename: 'page1-diagram.png'
+          },
+          {
+            type: 'text',
+            text: '\nThe diagram above illustrates a simple feedforward neural network with one input layer, one hidden layer, and one output layer.\n</page>'
+          },
+          {
+            type: 'text',
+            text: '<page number="2">\nTraining Performance\n\nThe following graph shows the training loss over 100 epochs:\n'
+          },
+          {
+            type: 'file',
+            mime: 'image/png',
+            url: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAwIiBoZWlnaHQ9IjMwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iNDAwIiBoZWlnaHQ9IjMwMCIgZmlsbD0iI2ZmZiIvPjx0ZXh0IHg9IjIwMCIgeT0iMzAiIGZvbnQtZmFtaWx5PSJBcmlhbCIgZm9udC1zaXplPSIxOCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC13ZWlnaHQ9ImJvbGQiPlRyYWluaW5nIExvc3MgT3ZlciBUaW1lPC90ZXh0Pjxwb2x5bGluZSBwb2ludHM9IjUwLDUwIDEwMCw4MCAxNTAsMTIwIDIwMCwxNDAgMjUwLDE3MCAzMDAsMTkwIDM1MCwyMDAiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzM0OThkYiIgc3Ryb2tlLXdpZHRoPSIzIi8+PGxpbmUgeDE9IjUwIiB5MT0iNTAiIHgyPSI1MCIgeTI9IjI1MCIgc3Ryb2tlPSIjMzMzIiBzdHJva2Utd2lkdGg9IjIiLz48bGluZSB4MT0iNTAiIHkxPSIyNTAiIHgyPSIzNTAiIHkyPSIyNTAiIHN0cm9rZT0iIzMzMyIgc3Ryb2tlLXdpZHRoPSIyIi8+PHRleHQgeD0iMjAwIiB5PSIyODAiIGZvbnQtZmFtaWx5PSJBcmlhbCIgZm9udC1zaXplPSIxMiIgdGV4dC1hbmNob3I9Im1pZGRsZSI+RXBvY2hzPC90ZXh0Pjx0ZXh0IHg9IjIwIiB5PSIxNTAiIGZvbnQtZmFtaWx5PSJBcmlhbCIgZm9udC1zaXplPSIxMiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgdHJhbnNmb3JtPSJyb3RhdGUoLTkwIDIwIDE1MCkiPkxvc3M8L3RleHQ+PC9zdmc+',
+            filename: 'page2-graph.png'
+          },
+          {
+            type: 'text',
+            text: '\nAs we can see, the loss decreases steadily during training, indicating successful convergence.\n\nConclusion:\nNeural networks are powerful tools for machine learning tasks.\n</page>'
+          }
+        ]
+      };
+
+      // Render showcase
+      document.getElementById('pdfOriginal').innerHTML = `
+        <div class="empty-state">
+          <div class="empty-state-icon">✨</div>
+          <div><strong>Showcase Example</strong></div>
+          <div style="margin-top: 10px; font-size: 14px;">This is a mock example showing how ReadTool processes a mixed content PDF</div>
+        </div>
+      `;
+
+      timings.load = 12.5;
+      timings.render = 234.7;
+      timings.process = 156.3;
+
+      renderStructuredContent(showcase.structuredContent);
+
+      document.getElementById('stats').textContent =
+        `📊 ${showcase.name} | ${showcase.pages} pages | ⏱️ Total: ${(timings.load + timings.render + timings.process).toFixed(2)}ms (mock)`;
+    }
+  </script>
+</body>
+</html>
