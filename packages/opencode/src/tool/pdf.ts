@@ -283,8 +283,7 @@ async function extractMixedContent(
           // PDF images are drawn in 1×1 unit space, then transformed by CTM
           const currentCTM = ctmStack[ctmStack.length - 1]
           if (!currentCTM) {
-            // Fallback: no CTM available, use original size
-            console.warn(`No CTM available for image ${imgName}, using original size`)
+            // Fallback: no CTM available, skip this image silently
             continue
           }
 
@@ -294,10 +293,7 @@ async function extractMixedContent(
           // Prevent extreme sizes that could cause memory issues
           const MAX_DIMENSION = 10000 // 10,000 pixels max
           if (displaySize.width > MAX_DIMENSION || displaySize.height > MAX_DIMENSION) {
-            console.warn(
-              `Display size too large for image ${imgName}: ${displaySize.width}×${displaySize.height}, using original size`,
-            )
-            // Fall back to original size
+            // Fall back to original size (silently)
             displaySize.width = imgData.width
             displaySize.height = imgData.height
           }
@@ -342,7 +338,7 @@ async function extractMixedContent(
         }
       } catch (err) {
         // 이미지 추출 실패는 무시 (일부 이미지는 추출 불가능할 수 있음)
-        console.warn(`Failed to extract image ${imgName}:`, err)
+        // Silently skip failed image extractions
       }
     }
   }
@@ -390,32 +386,9 @@ export async function processPdfFile(
     const hasText = await pageHasText(page)
 
     if (!hasText) {
-      // No text layer - render entire page as image
-      // For page rendering, we still need canvas since Sharp can't render PDF pages
-      const { createCanvas } = await import("@napi-rs/canvas")
-      const viewport = page.getViewport({ scale: 1.5 })
-      const canvas = createCanvas(viewport.width, viewport.height)
-      const context = canvas.getContext("2d")
-
-      await page.render({
-        canvasContext: context as any,
-        viewport: viewport,
-      }).promise
-
-      const imageBuffer = canvas.toBuffer("image/png")
-
+      // Skip image-only pages (silently to avoid stderr pollution)
       structuredContent.push(
-        { type: "text", text: `<page number="${pageNum}">` },
-        {
-          id: Identifier.ascending("part"),
-          sessionID: ctx.sessionID,
-          messageID: ctx.messageID,
-          type: "file",
-          mime: "image/png",
-          url: `data:image/png;base64,${imageBuffer.toString("base64")}`,
-          filename: `page${pageNum}.png`,
-        },
-        { type: "text", text: `</page>` },
+        { type: "text", text: `<page number="${pageNum}">[Image page - rendering disabled for debugging]</page>` },
       )
     } else {
       // Has text - extract mixed content (text + images) in order

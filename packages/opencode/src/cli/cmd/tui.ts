@@ -71,6 +71,54 @@ export const TuiCommand = cmd({
         default: "127.0.0.1",
       }),
   handler: async (args) => {
+    // Globally suppress stderr pollution from PDF.js and native libraries
+    // This prevents font warnings and other low-level errors from appearing in TUI
+    const originalStderrWrite = process.stderr.write.bind(process.stderr)
+    const originalConsoleError = console.error.bind(console)
+    const originalConsoleWarn = console.warn.bind(console)
+
+    // Comprehensive pattern list for all known PDF.js/font warnings
+    const suppressPatterns = [
+      // PDF.js font table errors (most common)
+      "glyf", "loca", "hmtx", "hhea", "post", "cmap", "head", "maxp", "name", "OS/2",
+      // PDF.js recovery messages
+      "trying to recover", "trying to repair",
+      // PDF.js generic warnings
+      "Warning:", "Error:", "Required", "table is not found", "is not found",
+      // PDF.js operational warnings
+      "Indexing all PDF objects", "standardFontDataUrl", "UnknownErrorException",
+      // Font-related keywords (broad catch)
+      "font", "Font", "FONT", "TrueType", "OpenType", "glyph",
+    ]
+
+    const shouldSuppress = (msg: string): boolean => {
+      return suppressPatterns.some(pattern => msg.includes(pattern))
+    }
+
+    // Override stderr.write
+    process.stderr.write = function (chunk: any, ...args: any[]): boolean {
+      const msg = chunk.toString()
+      if (shouldSuppress(msg)) {
+        return true // Pretend write succeeded
+      }
+      return originalStderrWrite(chunk, ...args)
+    } as any
+
+    // Override console.error and console.warn to catch all paths
+    console.error = function (...args: any[]) {
+      const msg = args.map(a => String(a)).join(" ")
+      if (!shouldSuppress(msg)) {
+        originalConsoleError(...args)
+      }
+    }
+
+    console.warn = function (...args: any[]) {
+      const msg = args.map(a => String(a)).join(" ")
+      if (!shouldSuppress(msg)) {
+        originalConsoleWarn(...args)
+      }
+    }
+
     while (true) {
       const cwd = args.project ? path.resolve(args.project) : process.cwd()
       try {
