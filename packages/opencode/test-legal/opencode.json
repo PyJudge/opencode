@@ -1,0 +1,173 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "keybinds": {
+    "session_child_cycle": "shift+right",
+    "session_child_cycle_reverse": "shift+left",
+  },
+
+  "agent": {
+    "plan": {
+      "disable": true
+    },
+    "build": {
+      "disable": true
+    },
+    "docs": {
+      "disable": true
+    },
+    "init": {
+      "mode": "primary",
+      "description": "사건 초기화 - 메타데이터 구축 및 전체 요약",
+      "tools": {
+        "read": true,
+        "readpdf": true,
+        "grep": true,
+        "glob": true,
+        "task": true,
+        "write": true,
+        "edit": false,
+        "bash": false
+      },
+      "permission": {
+        "edit": "ask",
+        "bash": {
+          "*": "deny"
+        },
+        "webfetch": "allow"
+      }
+    },
+    "reader": {
+      "mode": "primary",
+      "description": "PDF 문서 읽기 및 증거/주장 상세 분석",
+      "tools": {
+        "readpdf": true,
+        "read": true,
+        "grep": true,
+        "glob": true,
+        "task": true,
+        "write": true,
+        "edit": false,
+        "bash": false
+      },
+      "permission": {
+        "edit": "ask",
+        "bash": {
+          "*": "deny"
+        },
+        "webfetch": "allow"
+      }
+    },
+    "writer": {
+      "mode": "primary",
+      "description": "법률 분석 결과 작성 및 문서화",
+      "tools": {
+        "read": true,
+        "readpdf": true,
+        "grep": true,
+        "write": true,
+        "edit": true,
+        "task": true,
+        "bash": false
+      },
+      "permission": {
+        "edit": "allow",
+        "bash": {
+          "*": "deny"
+        },
+        "webfetch": "allow"
+      }
+    },
+    "claim-analyzer": {
+      "mode": "subagent",
+      "description": "reviewer의 재분석 요청을 받아 주장문서 원문에서 직접 내용을 발췌·보충·명확화하는 실행자",
+      "tools": {
+        "readpdf": true,
+        "read": true,
+        "grep": true,
+        "write": false,
+        "edit": false,
+        "bash": false
+      },
+      "permission": {
+        "edit": "deny",
+        "bash": {
+          "*": "deny"
+        }
+      }
+    },
+    "evidence-analyzer": {
+      "mode": "subagent",
+      "description": "reviewer의 재분석 요청을 받아 해당 증거의 사실·조항·문장 등을 원문에서 직접 확인하고, 요청사항을 충실히 수행하여 결과를 정리",
+      "tools": {
+        "readpdf": true,
+        "read": true,
+        "grep": true,
+        "write": false,
+        "edit": false,
+        "bash": false
+      },
+      "permission": {
+        "edit": "deny",
+        "bash": {
+          "*": "deny"
+        }
+      }
+    },
+    "claim-summarizer": {
+      "mode": "subagent",
+      "description": "소장·답변서·준비서면 등에서 주장 내용을 압축·구조화하여 체계적 요약 생성",
+      "tools": {
+        "readpdf": true,
+        "read": true,
+        "grep": false,
+        "write": false,
+        "edit": false,
+        "bash": false
+      },
+      "permission": {
+        "edit": "deny",
+        "bash": {
+          "*": "deny"
+        }
+      }
+    },
+    "evidence-summarizer": {
+      "mode": "subagent",
+      "description": "증거자료에서 주요 내용을 압축·구조화하여 체계적 요약 생성",
+      "tools": {
+        "readpdf": true,
+        "read": true,
+        "grep": false,
+        "write": false,
+        "edit": false,
+        "bash": false
+      },
+      "permission": {
+        "edit": "deny",
+        "bash": {
+          "*": "deny"
+        }
+      }
+    },
+    "result-reviewer": {
+      "mode": "subagent",
+      "description": "현재까지의 결과 품질 검토 및 재분석 요청",
+      "tools": {
+        "readpdf": false,
+        "read": true,
+        "grep": true,
+        "glob": true,
+        "task": true,
+        "write": false,
+        "edit": false,
+        "bash": false
+      },
+      "permission": {
+        "edit": "deny",
+        "bash": {
+          "*": "deny"
+        }
+      }
+    }
+  }
+}
