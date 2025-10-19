@@ -120,7 +120,7 @@ export const ReadPdfTool = Tool.define("readpdf", {
     })()
 
     if (!supportsImages) {
-      throw new Error(`Failed to read PDF: ${filepath}, model may not be able to read images (PDF content is converted to images)`)
+      throw new Error(`ERROR: Comclerk-cli only supports Vision llm models`)
     }
 
     // Get PDF metadata to determine total pages

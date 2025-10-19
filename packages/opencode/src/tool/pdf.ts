@@ -10,6 +10,7 @@
 
 import { Identifier } from "../id/id"
 import type { Tool } from "./tool"
+import { calculateOptimalDimensions } from "./image-scaler"
 
 type StructuredContentItem =
   | { type: "text"; text: string }
@@ -37,6 +38,66 @@ async function getPdfWorker() {
 export function isPdfFile(filePath: string): boolean {
   const ext = filePath.toLowerCase().split(".").pop()
   return ext === "pdf"
+}
+
+/**
+ * Identity Matrix for CTM
+ * [a, b, c, d, e, f] where a=d=1, b=c=e=f=0
+ */
+const IDENTITY_MATRIX = [1, 0, 0, 1, 0, 0]
+
+/**
+ * Multiply two transformation matrices
+ * [a1, b1, c1, d1, e1, f1] × [a2, b2, c2, d2, e2, f2]
+ *
+ * Matrix multiplication formula:
+ * result = [
+ *   a1*a2 + b1*c2,
+ *   a1*b2 + b1*d2,
+ *   c1*a2 + d1*c2,
+ *   c1*b2 + d1*d2,
+ *   e1*a2 + f1*c2 + e2,
+ *   e1*b2 + f1*d2 + f2
+ * ]
+ */
+export function multiplyMatrices(m1: number[], m2: number[]): number[] {
+  const [a1, b1, c1, d1, e1, f1] = m1
+  const [a2, b2, c2, d2, e2, f2] = m2
+
+  return [
+    a1 * a2 + b1 * c2,
+    a1 * b2 + b1 * d2,
+    c1 * a2 + d1 * c2,
+    c1 * b2 + d1 * d2,
+    e1 * a2 + f1 * c2 + e2,
+    e1 * b2 + f1 * d2 + f2,
+  ]
+}
+
+/**
+ * Get display size from CTM (Current Transformation Matrix)
+ *
+ * CTM = [a, b, c, d, e, f]
+ * Display width = sqrt(a² + b²)  - accounts for rotation/skew
+ * Display height = sqrt(c² + d²) - accounts for rotation/skew
+ *
+ * This handles all transformations including:
+ * - Simple scaling: [scaleX, 0, 0, scaleY, 0, 0]
+ * - Rotation: non-zero b, c values
+ * - Combined transforms: rotation + scale
+ */
+export function getDisplaySize(ctm: number[]): { width: number; height: number } {
+  const [a, b, c, d] = ctm
+
+  // Calculate actual display dimensions
+  const width = Math.sqrt(a * a + b * b)
+  const height = Math.sqrt(c * c + d * d)
+
+  // Round to integer pixels, minimum 1px
+  return {
+    width: Math.max(1, Math.round(width)),
+    height: Math.max(1, Math.round(height)),
+  }
 }
 
 /**
@@ -112,10 +173,44 @@ async function extractMixedContent(
   let textIdx = 0
   let currentTextBlock = ""
 
+  // CTM (Current Transformation Matrix) 스택 초기화
+  // PDF는 Graphics State Stack을 유지하며, save/restore로 관리
+  const ctmStack: number[][] = [[...IDENTITY_MATRIX]]
+
   // PDF 오퍼레이터를 순서대로 순회 (PDF 스트림 순서 = 렌더링 순서)
   for (let i = 0; i < ops.fnArray.length; i++) {
     const fn = ops.fnArray[i]
     const args = ops.argsArray[i]
+
+    // Graphics State 저장 (CTM 스택 push)
+    if (fn === pdfjsLib.OPS.save) {
+      const current = ctmStack[ctmStack.length - 1]
+      if (current) {
+        ctmStack.push([...current]) // 현재 CTM 복사해서 스택에 추가
+      }
+      continue
+    }
+
+    // Graphics State 복원 (CTM 스택 pop)
+    if (fn === pdfjsLib.OPS.restore) {
+      if (ctmStack.length > 1) {
+        ctmStack.pop() // 마지막 CTM 제거 (최소 1개는 유지)
+      }
+      continue
+    }
+
+    // CTM 변환 적용 (transform matrix 곱셈)
+    if (fn === pdfjsLib.OPS.transform) {
+      // args = [a, b, c, d, e, f]
+      const transformMatrix = args as number[]
+      if (transformMatrix.length === 6) {
+        const current = ctmStack[ctmStack.length - 1]
+        if (current) {
+          ctmStack[ctmStack.length - 1] = multiplyMatrices(current, transformMatrix)
+        }
+      }
+      continue
+    }
 
     // 텍스트 오퍼레이터 (Tj, TJ, ', " 등)
     if (
@@ -184,15 +279,56 @@ async function extractMixedContent(
           // 1 = GRAYSCALE_1BPP, 2 = RGB_24BPP, 3 = RGBA_32BPP
           const channels = imgData.kind === 1 ? 1 : imgData.kind === 2 ? 3 : 4
 
-          const buffer = await sharp(Buffer.from(imgData.data), {
+          // Get display size from current CTM
+          // PDF images are drawn in 1×1 unit space, then transformed by CTM
+          const currentCTM = ctmStack[ctmStack.length - 1]
+          if (!currentCTM) {
+            // Fallback: no CTM available, use original size
+            console.warn(`No CTM available for image ${imgName}, using original size`)
+            continue
+          }
+
+          const displaySize = getDisplaySize(currentCTM)
+
+          // Sanity check: display size should be reasonable
+          // Prevent extreme sizes that could cause memory issues
+          const MAX_DIMENSION = 10000 // 10,000 pixels max
+          if (displaySize.width > MAX_DIMENSION || displaySize.height > MAX_DIMENSION) {
+            console.warn(
+              `Display size too large for image ${imgName}: ${displaySize.width}×${displaySize.height}, using original size`,
+            )
+            // Fall back to original size
+            displaySize.width = imgData.width
+            displaySize.height = imgData.height
+          }
+
+          // Apply 2nd-stage token optimization scaling
+          // Stage 1 (above): CTM-based display size (PDF author's intent)
+          // Stage 2 (here): Token-optimized size (LLM efficiency)
+          const optimalSize = calculateOptimalDimensions(displaySize.width, displaySize.height)
+
+          // Sharp pipeline
+          let sharpPipeline = sharp(Buffer.from(imgData.data), {
             raw: {
               width: imgData.width,
               height: imgData.height,
               channels: channels,
             },
           })
-            .png()
-            .toBuffer()
+
+          // Resize to optimal size
+          // Performance: Skip if already at optimal size (wasScaled = false) AND matches original
+          const needsResize =
+            optimalSize.wasScaled || optimalSize.width !== imgData.width || optimalSize.height !== imgData.height
+
+          if (needsResize) {
+            sharpPipeline = sharpPipeline.resize(optimalSize.width, optimalSize.height, {
+              fit: "fill", // PDF 의도대로 정확히 맞춤 (비율 왜곡 허용)
+              kernel: "lanczos3", // 고품질 리샘플링
+            })
+          }
+
+          const buffer = await sharpPipeline.png().toBuffer()
 
           result.push({
             id: Identifier.ascending("part"),

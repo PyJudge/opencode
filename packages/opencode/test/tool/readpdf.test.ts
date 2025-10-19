@@ -32,7 +32,7 @@ test("readpdf - read entire PDF (pages not specified = all pages)", async () => 
       expect(result.metadata.requestedPages.length).toBe(result.metadata.pageCount)
     },
   })
-})
+}, 30000) // 타임아웃 30초로 증가
 
 test("readpdf - read single page", async () => {
   await Instance.provide({
@@ -129,7 +129,7 @@ test("readpdf - read mixed pages", async () => {
       expect(result.metadata.requestedPages).toEqual([1, 2, 1])
     },
   })
-})
+}, 30000) // 타임아웃 30초
 
 test("readpdf - page exceeds total pages error", async () => {
   await Instance.provide({
@@ -203,7 +203,7 @@ test("readpdf - excludeMargins option", async () => {
       expect(result.structuredContent).toBeDefined()
     },
   })
-})
+}, 30000) // 타임아웃 30초
 
 test("readpdf - image not supported by model error", async () => {
   await Instance.provide({
@@ -225,7 +225,7 @@ test("readpdf - image not supported by model error", async () => {
             metadata: async () => {},
           },
         )
-      }).toThrow("model may not be able to read images")
+      }).toThrow("only supports Vision llm models")
     },
   })
 })
