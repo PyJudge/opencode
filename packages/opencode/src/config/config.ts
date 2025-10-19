@@ -444,6 +444,12 @@ export namespace Config {
         .string()
         .optional()
         .describe("Custom username to display in conversations instead of system username"),
+      systemPrompt: z
+        .union([z.string(), z.literal(false)])
+        .optional()
+        .describe(
+          "Custom system prompt header for all providers. Set to false to disable provider headers entirely.",
+        ),
       mode: z
         .object({
           build: Agent.optional(),

@@ -94,7 +94,7 @@ export namespace SessionCompaction {
     const toSummarize = await Session.messages(input.sessionID).then(MessageV2.filterSummarized)
     const model = await Provider.getModel(input.providerID, input.modelID)
     const system = [
-      ...SystemPrompt.summarize(model.providerID),
+      ...(await SystemPrompt.summarize(model.providerID)),
       ...(await SystemPrompt.environment()),
       ...(await SystemPrompt.custom()),
     ]

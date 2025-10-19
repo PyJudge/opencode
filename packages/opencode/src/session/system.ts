@@ -17,7 +17,16 @@ import PROMPT_TITLE from "./prompt/title.txt"
 import PROMPT_CODEX from "./prompt/codex.txt"
 
 export namespace SystemPrompt {
-  export function header(providerID: string) {
+  export async function header(providerID: string, config?: Config.Info): Promise<string[]> {
+    if (!config) config = await Config.get()
+
+    // 1. Check if systemPrompt is explicitly set
+    if (config.systemPrompt !== undefined) {
+      if (config.systemPrompt === false) return []
+      return [config.systemPrompt]
+    }
+
+    // 2. Default behavior
     if (providerID.includes("anthropic")) return [PROMPT_ANTHROPIC_SPOOF.trim()]
     return []
   }
@@ -113,21 +122,15 @@ export namespace SystemPrompt {
     return Promise.all(found).then((result) => result.filter(Boolean))
   }
 
-  export function summarize(providerID: string) {
-    switch (providerID) {
-      case "anthropic":
-        return [PROMPT_ANTHROPIC_SPOOF.trim(), PROMPT_SUMMARIZE]
-      default:
-        return [PROMPT_SUMMARIZE]
-    }
+  export async function summarize(providerID: string, config?: Config.Info): Promise<string[]> {
+    if (!config) config = await Config.get()
+    const headers = await header(providerID, config)
+    return [...headers, PROMPT_SUMMARIZE]
   }
 
-  export function title(providerID: string) {
-    switch (providerID) {
-      case "anthropic":
-        return [PROMPT_ANTHROPIC_SPOOF.trim(), PROMPT_TITLE]
-      default:
-        return [PROMPT_TITLE]
-    }
+  export async function title(providerID: string, config?: Config.Info): Promise<string[]> {
+    if (!config) config = await Config.get()
+    const headers = await header(providerID, config)
+    return [...headers, PROMPT_TITLE]
   }
 }

@@ -403,7 +403,7 @@ export namespace SessionPrompt {
     providerID: string
     modelID: string
   }) {
-    let system = SystemPrompt.header(input.providerID)
+    let system = await SystemPrompt.header(input.providerID)
     system.push(
       ...(() => {
         if (input.system) return [input.system]
@@ -1634,13 +1634,14 @@ export namespace SessionPrompt {
         thinkingBudget: 0,
       }
     }
+    const titlePrompt = await SystemPrompt.title(small.providerID)
     generateText({
       maxOutputTokens: small.info.reasoning ? 1500 : 20,
       providerOptions: {
         [small.providerID]: options,
       },
       messages: [
-        ...SystemPrompt.title(small.providerID).map(
+        ...titlePrompt.map(
           (x): ModelMessage => ({
             role: "system",
             content: x,
