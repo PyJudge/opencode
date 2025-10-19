@@ -8,16 +8,21 @@ Usage:
   * Multiple specific pages: pages: "1,3,5,7" (reads pages 1, 3, 5, 7)
   * Mixed format: pages: "1-3,7,9-10" (reads pages 1, 2, 3, 7, 9, 10)
 - Page numbers are 1-based (first page is page 1)
-- If pages is not specified, the tool will attempt to read ALL pages in the PDF (this will FAIL if the PDF has more than 100 pages due to API limitations)
+- If pages is not specified, the tool will attempt to read ALL pages in the PDF (this will FAIL if the PDF has more than 10 pages, as maximum 10 pages can be read per call due to token/context limitations)
 - The excludeMargins parameter controls whether to filter out headers/footers/margins (defaults to true)
+- Maximum pages per call: 10 pages
+  * Reading more than 10 pages in a single call will fail
+  * For larger documents, read in chunks (pages: "1-10", then pages: "11-20", etc.)
+  * Or read only specific relevant pages (pages: "5,12,25")
 
 When to use pages parameter:
 - User asks "what's on page 15" or "15쪽에 뭐가 있어요" → use pages: 15
 - User asks "read page 100" or "100쪽만 읽고" → use pages: 100
 - User asks "read pages 10-20" or "10-20페이지" → use pages: "10-20"
-- User asks "first 50 pages" or "처음 50쪽" → use pages: "1-50"
+- User asks "first 10 pages" or "처음 10쪽" → use pages: "1-10"
 - User asks "show page 1 and page 5" → use pages: "1,5"
-- User asks about the entire document AND you don't know the page count → omit pages (but be prepared for it to fail if > 100 pages)
+- For PDFs with > 10 pages → you MUST use the pages parameter to read in chunks or specific pages only
+- User asks about entire document AND page count unknown → omit pages (but expect failure if > 10 pages)
 
 Examples:
 - readpdf({ filePath: "/path/file.pdf", pages: 15 })

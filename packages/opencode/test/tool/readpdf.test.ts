@@ -249,9 +249,97 @@ test("readpdf - output format", async () => {
         },
       )
 
-      expect(result.output).toBe("")
+      // Output should contain page count info
+      expect(result.output).toContain("📄 PDF:")
+      expect(result.output).toContain("pages total")
       expect(result.structuredContent).toBeDefined()
       expect(result.metadata.preview).toBeDefined()
+    },
+  })
+})
+
+test("readpdf - max 10 pages limit", async () => {
+  await Instance.provide({
+    directory: process.cwd(),
+    fn: async () => {
+      const tool = await ReadPdfTool.init()
+
+      // Attempt to read 11 pages (using duplicate pages if needed)
+      expect(async () => {
+        await tool.execute(
+          { filePath: testPdfPath, pages: "1,1,1,1,1,1,1,1,1,1,1" },
+          {
+            sessionID: Identifier.ascending("session"),
+            messageID: Identifier.ascending("message"),
+            agent: "test",
+            abort: new AbortController().signal,
+            extra: {
+              supportsPdf: true,
+            },
+            metadata: async () => {},
+          },
+        )
+      }).toThrow("Too many pages to read")
+    },
+  })
+})
+
+test("readpdf - range exceeds total pages (clips and warns)", async () => {
+  await Instance.provide({
+    directory: process.cwd(),
+    fn: async () => {
+      const tool = await ReadPdfTool.init()
+
+      // Request pages 1-999, but PDF has fewer pages
+      // Should clip to available pages and return warning
+      const result = await tool.execute(
+        { filePath: testPdfPath, pages: "1-999" },
+        {
+          sessionID: Identifier.ascending("session"),
+          messageID: Identifier.ascending("message"),
+          agent: "test",
+          abort: new AbortController().signal,
+          extra: {
+            supportsPdf: true,
+          },
+          metadata: async () => {},
+        },
+      )
+
+      // Should have warning in output
+      expect(result.output).toContain("⚠️")
+      expect(result.output).toContain("Requested pages")
+      expect(result.output).toContain("but PDF has only")
+
+      // Should read available pages
+      expect(result.metadata.requestedPages.length).toBeGreaterThan(0)
+      expect(result.metadata.requestedPages.length).toBeLessThanOrEqual(10) // Still subject to 10-page limit
+    },
+  })
+}, 30000)
+
+test("readpdf - all requested pages out of bounds (error)", async () => {
+  await Instance.provide({
+    directory: process.cwd(),
+    fn: async () => {
+      const tool = await ReadPdfTool.init()
+
+      // Request pages that don't exist at all
+      expect(async () => {
+        await tool.execute(
+          { filePath: testPdfPath, pages: "9999-10000" },
+          {
+            sessionID: Identifier.ascending("session"),
+            messageID: Identifier.ascending("message"),
+            agent: "test",
+            abort: new AbortController().signal,
+            extra: {
+              supportsPdf: true,
+            },
+            metadata: async () => {},
+          },
+        )
+      }).toThrow("completely out of bounds")
     },
   })
 })

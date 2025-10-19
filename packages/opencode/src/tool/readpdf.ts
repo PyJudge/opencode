@@ -15,14 +15,20 @@ import { isPdfFile, processPdfFile } from "./pdf"
  * - Range: "1-5" → [1,2,3,4,5]
  * - List: "1,3,5" → [1,3,5]
  * - Mixed: "1-3,7,9-10" → [1,2,3,7,9,10]
+ *
+ * Returns: { pages: number[], warnings: string[] }
+ * - If range exceeds PDF pages, clips to available range and returns warning
+ * - If all requested pages are out of range, throws error
  */
-function parsePages(input: number | string, totalPages: number): number[] {
+function parsePages(input: number | string, totalPages: number): { pages: number[]; warnings: string[] } {
+  const warnings: string[] = []
+
   // Single number
   if (typeof input === "number") {
     if (input < 1 || input > totalPages) {
       throw new Error(`Page ${input} exceeds total pages (${totalPages})`)
     }
-    return [input]
+    return { pages: [input], warnings }
   }
 
   // String format
@@ -40,15 +46,28 @@ function parsePages(input: number | string, totalPages: number): number[] {
         throw new Error(`Invalid page format: "${part}"`)
       }
 
-      if (start < 1 || end > totalPages) {
-        throw new Error(`Page range ${start}-${end} exceeds total pages (${totalPages})`)
-      }
-
       if (start > end) {
         throw new Error(`Invalid page range: ${start}-${end} (start > end)`)
       }
 
-      for (let i = start; i <= end; i++) {
+      // Check if entire range is out of bounds
+      if (start > totalPages) {
+        throw new Error(
+          `Requested page range ${start}-${end} is completely out of bounds.\n` +
+            `PDF has only ${totalPages} pages. Please request pages between 1-${totalPages}.`,
+        )
+      }
+
+      // Clip end to totalPages if it exceeds
+      let actualEnd = end
+      if (end > totalPages) {
+        actualEnd = totalPages
+        warnings.push(
+          `⚠️  Requested pages ${start}-${end}, but PDF has only ${totalPages} pages. Reading pages ${start}-${actualEnd} instead.`,
+        )
+      }
+
+      for (let i = start; i <= actualEnd; i++) {
         result.push(i)
       }
     } else {
@@ -67,7 +86,7 @@ function parsePages(input: number | string, totalPages: number): number[] {
     }
   }
 
-  return result
+  return { pages: result, warnings }
 }
 
 export const ReadPdfTool = Tool.define("readpdf", {
@@ -78,12 +97,9 @@ export const ReadPdfTool = Tool.define("readpdf", {
       .union([z.number(), z.string()])
       .optional()
       .describe(
-        "Page selection: single page (15), range (\"1-5\"), list (\"1,3,5\"), or mixed (\"1-3,7,9-10\"). Omit to read all pages (fails if PDF > 100 pages).",
+        'Page selection: single page (15), range ("1-5"), list ("1,3,5"), or mixed ("1-3,7,9-10"). Omit to read all pages (max 10 pages can be read per call).',
       ),
-    excludeMargins: z
-      .boolean()
-      .optional()
-      .describe("Whether to exclude headers/footers/margins (default: true)"),
+    excludeMargins: z.boolean().optional().describe("Whether to exclude headers/footers/margins (default: true)"),
   }),
   async execute(params, ctx) {
     // Resolve absolute path
@@ -133,7 +149,20 @@ export const ReadPdfTool = Tool.define("readpdf", {
     const totalPages = pdf.numPages
 
     // Parse pages parameter (undefined means all pages)
-    const requestedPages = params.pages !== undefined ? parsePages(params.pages, totalPages) : undefined
+    const parseResult = params.pages !== undefined ? parsePages(params.pages, totalPages) : undefined
+    const requestedPages = parseResult?.pages
+    const warnings = parseResult?.warnings ?? []
+
+    // Validate page count (max 10 pages per call)
+    const pagesToRead = requestedPages ?? Array.from({ length: totalPages }, (_, i) => i + 1)
+    if (pagesToRead.length > 10) {
+      throw new Error(
+        `Too many pages to read: ${pagesToRead.length} pages requested (max: 10 pages per call).\n` +
+          `Please read fewer pages:\n` +
+          `  1. Read in chunks: pages: "1-10", then pages: "11-20", etc.\n` +
+          `  2. Read only specific relevant pages: pages: "5,12,25"`,
+      )
+    }
 
     // Process PDF
     const excludeMargins = params.excludeMargins ?? true
@@ -158,9 +187,17 @@ export const ReadPdfTool = Tool.define("readpdf", {
     // Track file access
     FileTime.read(ctx.sessionID, filepath)
 
+    // Prepare output with page count info and warnings
+    const outputLines: string[] = []
+    outputLines.push(`📄 PDF: ${totalPages} pages total`)
+    if (warnings.length > 0) {
+      outputLines.push(...warnings)
+    }
+    const output = outputLines.join("\n")
+
     return {
       title,
-      output: "", // Empty output, use structuredContent
+      output,
       metadata: {
         preview,
         pageCount: totalPages,
