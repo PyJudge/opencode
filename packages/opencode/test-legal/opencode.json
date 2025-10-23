@@ -131,7 +131,7 @@
     },
     "result-reviewer": {
       "mode": "subagent",
-      "description": "현재까지의 결과 품질 검토 및 재분석 요청",
+      "description": "복잡한 쟁점에 대한 독립 심층 검토 세션 관리 (Analyzer와 핑퐁하며 누락/오류/불일치 해소)",
       "tools": {
         "readpdf": false,
         "read": true,
