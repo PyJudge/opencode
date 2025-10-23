@@ -16,27 +16,6 @@
     "docs": {
       "disable": true
     },
-    "init": {
-      "mode": "primary",
-      "description": "사건 초기화 - 메타데이터 구축 및 전체 요약",
-      "tools": {
-        "read": true,
-        "readpdf": true,
-        "grep": true,
-        "glob": true,
-        "task": true,
-        "write": true,
-        "edit": false,
-        "bash": false
-      },
-      "permission": {
-        "edit": "ask",
-        "bash": {
-          "*": "deny"
-        },
-        "webfetch": "allow"
-      }
-    },
     "reader": {
       "mode": "primary",
       "description": "PDF 문서 읽기 및 증거/주장 상세 분석",
@@ -168,6 +147,28 @@
         "bash": {
           "*": "deny"
         }
+      }
+    },
+    "legal-analyst": {
+      "mode": "subagent",
+      "description": "법조문·판례 검색 및 분석 (AI 상식 금지, 웹 검색 필수)",
+      "tools": {
+        "websearch": true,
+        "webfetch": true,
+        "read": true,
+        "grep": true,
+        "write": false,
+        "edit": false,
+        "readpdf": false,
+        "task": false,
+        "bash": false
+      },
+      "permission": {
+        "edit": "deny",
+        "bash": {
+          "*": "deny"
+        },
+        "webfetch": "allow"
       }
     }
   }
